@@ -75,10 +75,16 @@ class Marasa:
     def _segfiles(self, ns):
         return self.dir.glob(ns + '.*')
 
+    def _segfile_for_seg(self, ns, seg) -> Path:
+        """Segfile for the specified segment.  Note: may not exist"""
+        return self.dir / f"{ns}.{seg:09}"
+
     def _segfile_for_seq(self, namespace: str, seq: Optional[int]=None) -> Optional[Path]:
         """
         find the namespace file to open to get the state as of seqno=seq.
+        eg. the largest segfile under the segment specified by seq.
         If seq is None, get the latest one.
+        If there is no such namespace, or it's empty at or before that seq, return None
         """
         seg = seq // self.epoch_size if seq is not None else None
         biggest = (-1, None)
@@ -97,8 +103,7 @@ class Marasa:
         """write to a single file
         """
         # figure out the file to write to
-        seg = seqno // self.epoch_size
-        segfile = self.dir / f'{namespace}.{seg:09}'
+        segfile = self._segfile_for_seg(namespace, seqno // self.epoch_size)
         if not segfile.exists():
             #  create it, and store a full snapshot in it
             mode = 'w'
@@ -120,7 +125,7 @@ class Marasa:
 
     def _read_ns(self, namespace: str):
         """Return a tuple of the last seqno and the latest state for the specified namespace"""
-        state = {}
+        state: Dict[str, Any] = dict()
         seqno = 0
         segfile = self._segfile_for_seq(namespace, None)
         if segfile is not None:
@@ -175,13 +180,50 @@ class Marasa:
         logging.debug("read historical state %r", state)
         return state.get(key, NOTFOUND)
 
-    def read_range(self, namespace, start_seqno, key=None):
+    def read(self, namespace: str, start_seqno: int, key=None):
         """
         return a generator that will return the initial state and then the changes.
         of either the specified key or the whole namespace if key is None
+        If the specified key doesn't exist at start_seqno, NOTFOUND will be returned
         """
-        pass
+        # get full initial state to send
+        segfile = self._segfile_for_seq(namespace, start_seqno)
+        if segfile is None:
+            yield start_seqno, NOTFOUND
+        else:
+            state = {} if key is None else { key: NOTFOUND }
+            sentfirst = False
+            with segfile.open() as f:
+                for seq, data in self._segfile_reader(f):
 
+                    if key is None:
+                        state.update(data)
+                        if seq >= start_seqno:
+                            yield seq, state
+                    else:
+                        if not sentfirst:
+                            if seq > start_seqno:
+                                yield start_seqno, state[key]
+                                sentfirst = True
+                            state[key] = data.get(key, NOTFOUND)
+                        if key in data:
+                            yield seq, data[key]
+            if not sentfirst:
+                yield start_seqno, state if key is None else state[key]
+
+        curseg = ( start_seqno // self.epoch_size )
+        # use a lambda for lastseg b/c self.seq could change while looping
+        lastseg = lambda : self.seq // self.epoch_size
+        while curseg < lastseg():
+            curseg += 1
+            segfile = self._segfile_for_seg(namespace, curseg)
+            if not segfile.exists(): continue
+            with segfile.open() as f:
+                for seq, data in self._segfile_reader(f):
+                    if key is None:
+                        yield seq, data
+                    elif key in data:
+                        yield seq, data[key]
 
 
 

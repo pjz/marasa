@@ -17,4 +17,8 @@ def test_simple(db):
         v = db.get(NS, key='k', seqno=i)
         assert v == i-1
 
+    # ensure that read() works
+    for s, d in db.read(NS, 1, 'k'):
+        assert d == s-1
+
 
