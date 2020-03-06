@@ -1,8 +1,8 @@
 
 
-def test_simple(db):
+def test_single_ns(db):
 
-    NS = 'name'
+    NS = 'ns'
 
     # make 21 entries, 0..20
     for i in range(21):
@@ -20,5 +20,23 @@ def test_simple(db):
     # ensure that read() works
     for s, d in db.read(NS, 1, 'k'):
         assert d == s-1
+
+
+def test_multi_ns(db):
+
+    namespaces = ('ns1', 'ns2', 'ns3', 'ns2', 'ns1')
+
+    for i, ns in enumerate(namespaces):
+        for j in range(6):
+            db.write(ns, {'k': i*10 + j})
+
+    # make sure all the namespaces exist
+    assert set(db.namespaces()) == set(namespaces)
+
+    # make sure that changes in ns2/3 don't affect ns1
+    # and that asking ns1 for seqnos that dont have changes in ns1 works
+    ns1_middle = db.get('ns1', 'k', 7)
+    for s in range(8, 20):
+        assert db.get('ns1', 'k', s) == ns1_middle
 
 

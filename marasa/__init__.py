@@ -9,6 +9,12 @@ NOTFOUND = object()
 
 
 class Marasa:
+    """
+    Marasa stores data as a series of changes, written to what are essentially logfiles.
+    Each logfile is segmented into at most :epoch_size: lines.
+    Each line consists of a sequence number followed by a space followed by the json representation of the changes
+    made.
+    """
 
     def __init__(self, storage_dir: Union[Path, str], epoch_size=10000):
         """
@@ -234,6 +240,20 @@ class Marasa:
 
 
 class MultiWrite:
+    """
+    A helper class for writing into multple namespaces simultaneously.
+    Usage:
+
+        w = MultiWrite(db)
+        w.write('foo', {1:2})
+        w.write('bar', {1:2})
+        w.execute()
+
+    though it also implements the Builder pattern so it ca be written as:
+
+        MultiWrite(db).write('foo', {1:2}).write('bar', {1:2}).execute()
+
+    """
 
     def __init__(self, db):
         self.db = db
@@ -247,3 +267,4 @@ class MultiWrite:
 
     def execute(self):
         self.db.multiwrite(self.ops)
+
