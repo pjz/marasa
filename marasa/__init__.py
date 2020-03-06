@@ -1,7 +1,6 @@
 
 from pathlib import Path
 
-# future speed improvement:
 import orjson as json
 
 NOTFOUND = object()
@@ -43,7 +42,7 @@ class Marasa:
         for ns in ns_kvdict:
             self._write(ns, self._seq, ns_kvdict[ns])
 
-    def read(self, namespace, key=None, seqno=None):
+    def read_val(self, namespace, key=None, seqno=None):
         """
         return the values from the specified namespace
         :key: only get the value of the specified key
@@ -64,32 +63,33 @@ class Marasa:
         """raw list of namespaces, from the filesystem"""
         return set( f.name.split('.', 1)[0] for f in self.dir.glob('*.*') if f.is_file() )
 
-    def _nsfiles(self, ns):
+    def _segfiles(self, ns):
         return self.dir.glob(ns + '.*')
 
-    def _nsfile_for_seq(self, ns, seq=None):
+    def _segfile_for_seq(self, namespace, seq=None):
         """find the namespace file to open to get the state as of seqno=seq.  If seq is None, get the latest one."""
-        seqn = seq // self.epoch_size if seq is not None else None
+        seg = seq // self.epoch_size if seq is not None else None
         biggest = (-1, None)
-        for f in self._nsfiles(namespace):
-            fn = int(f.name.split('.')[-1])
-            if seqn is not None:
-                if seqn == fn: return f.name
-                if fn > seqn: continue
-            if fn > biggest[0]:
-                biggest = (fn, f)
+        for f in self._segfiles(namespace):
+            fileseg = int(f.name.split('.')[-1])
+            if seg is not None:
+                if seg == fileseg: return f.name
+                if fileseg > seg: continue
+            if fileseg > biggest[0]:
+                biggest = (fileseg, f)
         return biggest[1]
 
-    def _latest_nsfile(self, ns):
+    def _latest_segfile(self, ns):
         """latest file for the specified namespace"""
-        return self._nsfile_for_seq(ns, None)
+        return self._segfile_for_seq(ns, None)
 
     def _write(self, namespace, seqno, kvdict):
-        """write to a single file"""
+        """write to a single file
+        """
         # figure out the file to write to
-        fn = seqno // self.epoch_size
-        fnfile = Path(f'{namespace}.{fn:09}')
-        if not fnfile.exists():
+        seg = seqno // self.epoch_size
+        segfile = Path(f'{namespace}.{seg:09}')
+        if not segfile.exists():
             #  create it, and store a full snapshot in it
             mode = 'w'
             data = self._state.get(namespace, {}).copy()
@@ -100,9 +100,9 @@ class Marasa:
         # apply the changes to what's to be stored
         data.update(kvdict)
         # write it out
-        with fnfile.open(mode) as f:
-            fndata = str(seqno) + " " + json.dumps(data) + '\n'
-            f.write(fndata)
+        with segfile.open(mode) as f:
+            dataline = str(seqno) + " " + json.dumps(data) + '\n'
+            f.write(dataline)
         # update cache
         if namespace not in self._state:
             self._state[namespace] = {}
@@ -112,8 +112,8 @@ class Marasa:
         """read a single namespace in full.  Return a tuple of the last seqno and the latest state"""
         state = {}
         seqno = 0
-        with self._latest_nsfile(namespace).open() as f:
-            for seq, data in self._nsfile_reader(f):
+        with self._latest_segfile(namespace).open() as f:
+            for seq, data in self._segfile_reader(f):
                 seqno = seq
                 state.update(data)
         return seqno, state
@@ -138,7 +138,7 @@ class Marasa:
         return value.get(key, NOTFOUND)
 
     @staticmethod
-    def _nsfile_reader(fh):
+    def _segfile_reader(fh):
         for line in fh:
             seqno, jdata = line.split(' ', 1)
             yield seqno, json.loads(jdata)
@@ -147,11 +147,11 @@ class Marasa:
         # see if we can cheat
         # TODO: track last-update of each subitem in ._state
         if seqno == self.seq:
-            return self.read_cur(namespace, key)
+            return self._read_cur(namespace, key)
         state = {}
         # read from a point in history
-        with self._nsfile_for_seq(namespace, seqno).open() as f:
-            for seq, data in self._nsfile_reader(f):
+        with self._segfile_for_seq(namespace, seqno).open() as f:
+            for seq, data in self._segfile_reader(f):
                 if seq <= seqno:
                     state.update(data)
                 else:
@@ -159,6 +159,15 @@ class Marasa:
         if key is None:
             return state
         return state.get(key, NOTFOUND)
+
+    def read_range(self, namespace, start_seqno):
+        """
+        return a generator that will return the initial state and then the changes
+        """
+        pass
+
+
+
 
 
 

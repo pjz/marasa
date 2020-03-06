@@ -45,12 +45,11 @@ pylint: $(VBIN)/pytest
 		-m pylint \
 		--cache-clear \
 		$(PYTEST_ARGS)
-		--junit-xml=$@.xml
 
 .PHONY: mypy
 mypy: $(VBIN)/pytest
 	PYTHONWARNINGS="ignore,default:::$(PROJ)" \
-	$(VBIN)/pytest --mypy -m mypy $(PROJ) --junit-xml=$@.xml
+	$(VBIN)/pytest --mypy -m mypy $(PROJ) $(PYTEST_ARGS)
 
 .PHONY: test
 test: $(VBIN)/pytest
@@ -58,7 +57,7 @@ test: $(VBIN)/pytest
 	$(VBIN)/pytest tests $(PYTEST_ARGS)
 
 .PHONY: ci
-ci:: PYTEST_ARGS:=--junit-xml=$@.xml
+ci:: PYTEST_ARGS:=--junit-xml=ci.xml
 ci:: pylint mypy test
 
 
