@@ -173,9 +173,7 @@ class EventLogMulti:
 
         # now send subsequent segments
         curseg = ( start_seqno // self.segment_size )
-        ## use a lambda for lastseg b/c self.seq could change while looping
-        lastseg = lambda : self.seq // self.segment_size
-        while curseg < lastseg():
+        while curseg < self.seq // self.segment_size:
             curseg += 1
             segfile = self._segfile_for_seg(typestr, curseg)
             if not segfile.exists(): continue
@@ -191,7 +189,6 @@ class EventLogMulti:
         If the specifie sequence number doesn't exist, NOTFOUND will be returned
         """
 
-
         def _existing_segfiles(typelist, segno):
             for t in typelist:
                 segfile = self._segfile_for_seg(t, segno)
@@ -200,7 +197,7 @@ class EventLogMulti:
 
         types = self._types() if typenames is None else typenames
         curseg = ( start_seqno // self.segment_size )
-        while curseg < lastseg():
+        while curseg < self.seq // self.segment_size:
             cursors = { t: self._segfile_reader(f.open()) for t, f in  _existing_segfiles(types, curseg) }
             latest = { t: next(cursors[t]) for t in cursors }
             while cursors:
