@@ -1,12 +1,14 @@
 
 import logging
 from pathlib import Path
-from typing import Union, Optional, Dict, Any, List
+from typing import Union, Optional, Dict, Any, List, Callable, TypeVar
 
 from .constants import NOTFOUND
 
 # replay me these message types from this point in time, in order [and maybe continue in real time]
 # get me the latest of this message type
+
+YourEventType = TypeVar('YourEventType')
 
 class EventLogMulti:
     """
@@ -18,7 +20,10 @@ class EventLogMulti:
 
     NOTFOUND = NOTFOUND
 
-    def __init__(self, storage_dir: Union[Path, str], serializer, deserializer, segment_size=10000):
+    def __init__(self, storage_dir: Union[Path, str],
+                 serializer: Callable[[YourEventType], str],
+                 deserializer: Callable[[str], YourEventType],
+                 segment_size: int =10000):
         """
         :storage_dir: is the directory to store log files in
         :serializer: a single-argument function that can serialize any events handed to write().  IMPORTANT: the output

@@ -1,9 +1,12 @@
-
 import logging
 from pathlib import Path
-from typing import Union, Optional, Dict, Any, List
+from typing import Union, Optional, Dict, Any, List, Callable, TypeVar, Iterable, Tuple
 
-from .constants import NOTFOUND
+from .constants import NotFound, NOTFOUND
+
+YourEventType = TypeVar('YourEventType')
+
+Datum = Union[NotFound, str]
 
 class EventLogSingle:
     """
@@ -13,7 +16,10 @@ class EventLogSingle:
     made.
     """
 
-    def __init__(self, storage_dir: Union[Path, str], basename: str, serializer, deserializer, segment_size=10000):
+    def __init__(self, storage_dir: Union[Path, str], basename: str,
+                 serializer: Callable[[YourEventType], str],
+                 deserializer: Callable[[str], YourEventType],
+                 segment_size: int =10000):
         """
         :storage_dir: is the directory to store log files in
         :basename: the name prefix events are stored in under storage_dir
@@ -24,7 +30,7 @@ class EventLogSingle:
         a 10MB file
         """
         self.dir = storage_dir if isinstance(storage_dir, Path) else Path(storage_dir)
-        self.name = name
+        self.name = basename
         logging.debug(f"Making a {self.__class__.__name__}DB in %s", str(self.dir))
         if not self.dir.exists():
             self.dir.mkdir()
@@ -32,14 +38,14 @@ class EventLogSingle:
         self._seq = self.reload()
         self.serialize = serializer
         self.deserialize = deserializer
-        self._cur = NOTFOUND
+        self._cur: Datum = NOTFOUND
 
     @property
-    def seq(self):
+    def seq(self) -> int:
         """The sequence number.  Non-writable."""
         return self._seq
 
-    def put(self, event):
+    def put(self, event: YourEventType) -> int:
         """
         save the specified event
         return the seqno it was saved at
@@ -48,14 +54,11 @@ class EventLogSingle:
         self._write(self._seq, type(event).__name__, self.serialize(event))
         return self._seq
 
-    def get(self, seqno: Optional[int]=None):
+    def get(self, seqno: Optional[int]=None) -> YourEventType:
         """
         return the event at the specified
-        :key: only get the value of the specified key
-        :seqno: get value at or before the specified sequence number.  If not specified, get the current value
-        Empty namespaces are empty, missing keys are NOTFOUND
+        :seqno: get value at or before the specified sequence number.  If not specified, get the current value.
         """
-        result = NOTFOUND
         if seqno is None:
             result = self._read_cur()
         elif seqno < 1:
@@ -76,7 +79,7 @@ class EventLogSingle:
         find the namespace file to open to get the state as of seqno=seq.
         eg. the largest segfile under the segment specified by seq.
         If seq is None, get the latest one.
-        If there is no such namespace, or it's empty at or before that seq, return None
+        Returns None if there is no such namespace, or it's empty at and before that seq
         """
         seg = seq // self.segment_size if seq is not None else None
         biggest = (-1, None)
@@ -91,7 +94,7 @@ class EventLogSingle:
                 biggest = (fileseg, f)
         return biggest[1]
 
-    def _write(self, seqno: int, typestr, data):
+    def _write(self, seqno: int, typestr: str, data: str):
         """write to a single file
         """
         # figure out the file to write to
@@ -103,11 +106,15 @@ class EventLogSingle:
             f.write(dataline)
         self._cur = data
 
-    def reload(self):
+    def reload(self) -> int:
         latest = 0
-        with self._segfile_for_seq() as f:
-            seqno, state = self._read_ns(ns)
-            latest = max(latest, seqno)
+        cur: Datum = NOTFOUND
+        segfile = self._segfile_for_seq()
+        if segfile is None:
+            return 0
+        for seq, _, data in self._segfile_reader(segfile):
+            latest, cur = seq, data
+        self._cur = cur
         return latest
 
     def _read_cur(self):
@@ -131,18 +138,21 @@ class EventLogSingle:
         logging.debug("looking in history")
         result = NOTFOUND
         # read from a point in history
-        with self._segfile_for_seq(seqno).open() as f:
+        segfile = self._segfile_for_seq(seqno)
+        if segfile is None:
+            return NOTFOUND
+        with segfile.open() as f:
             for seq, _, data in self._segfile_reader(f):
-                if seq > seqno:
-                    break
                 if seq == seqno:
                     return data
-        return NOTFOUND
+                elif seq > seqno:
+                    break
 
-    def read(self, start_seqno: int, typenames=None):
+    def read(self, start_seqno: int, typenames=None) -> Iterable[Tuple[int, Union[YourEventType, NotFound]]]:
         """
-        return a generator that will return the initial event and all subsequent events
-        of the specified type names (or all types if typenames is unspecified)
+        return a generator that will return (seqence number, event) tuples for the
+        initial event and all subsequent events of the specified type names (or
+        all types if typenames is unspecified)
         If the specifie sequence number doesn't exist, NOTFOUND will be returned
         """
         segfile = self._segfile_for_seq(start_seqno)
