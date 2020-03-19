@@ -1,4 +1,8 @@
 
+import logging
+from pathlib import Path
+from typing import Union, Optional, Dict, Any, List
+
 from .constants import NOTFOUND
 
 # replay me these message types from this point in time, in order [and maybe continue in real time]
@@ -12,6 +16,8 @@ class EventLogMulti:
     made.
     """
 
+    NOTFOUND = NOTFOUND
+
     def __init__(self, storage_dir: Union[Path, str], serializer, deserializer, segment_size=10000):
         """
         :storage_dir: is the directory to store log files in
@@ -22,7 +28,7 @@ class EventLogMulti:
         a 10MB file
         """
         self.dir = storage_dir if isinstance(storage_dir, Path) else Path(storage_dir)
-        logging.debug("Making a %s in %s", self.__class__.name, str(self.dir))
+        logging.debug(f"Making a {self.__class__.__name__}DB in %s", str(self.dir))
         if not self.dir.exists():
             self.dir.mkdir()
         self.segment_size = segment_size
@@ -38,11 +44,12 @@ class EventLogMulti:
 
     def put(self, event):
         """
-        save the specified event
+        save the specified :event
         return the seqno it was saved at
         """
         self._seq += 1
-        self._write(self._seq, type(event).__name__, self.serialize(event))
+        typestr = type(event).__name__
+        self._write(self._seq, typestr, self.serialize(event))
         return self._seq
 
     def get(self, msgtypes: Optional[List[str]]=None, seqno: Optional[int]=None):
@@ -209,7 +216,7 @@ class EventLogMulti:
             curseg += 1
 
 
-
+Taimo = EventLogMulti
 
 
 

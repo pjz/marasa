@@ -1,3 +1,5 @@
 
-NOTFOUND = object()
+class NotFound: pass
+
+NOTFOUND = NotFound()
 

@@ -1,4 +1,8 @@
 
+import logging
+from pathlib import Path
+from typing import Union, Optional, Dict, Any, List
+
 from .constants import NOTFOUND
 
 class EventLogSingle:
@@ -21,7 +25,7 @@ class EventLogSingle:
         """
         self.dir = storage_dir if isinstance(storage_dir, Path) else Path(storage_dir)
         self.name = name
-        logging.debug("Making a MarasaDB in %s", str(self.dir))
+        logging.debug(f"Making a {self.__class__.__name__}DB in %s", str(self.dir))
         if not self.dir.exists():
             self.dir.mkdir()
         self.segment_size = segment_size

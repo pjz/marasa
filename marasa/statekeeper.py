@@ -1,7 +1,7 @@
 
 import logging
 from pathlib import Path
-from typing import Union, Optional, Dict, Any
+from typing import Union, Optional, Dict, Any, List
 
 import orjson as json
 
@@ -9,11 +9,13 @@ from .constants import NOTFOUND
 
 class StateKeeper:
     """
-    Marasa stores data as a series of changes, written to what are essentially logfiles.
+    StateKeeper stores data as a series of changes, written to what are essentially logfiles.
     Each logfile is segmented into at most :segment_size: lines.
     Each line consists of a sequence number followed by a space followed by the json representation of the changes
     made.
     """
+
+    NOTFOUND = NOTFOUND
 
     def __init__(self, storage_dir: Union[Path, str], segment_size=10000):
         """
@@ -22,7 +24,7 @@ class StateKeeper:
         a 10MB file
         """
         self.dir = storage_dir if isinstance(storage_dir, Path) else Path(storage_dir)
-        logging.debug("Making a MarasaDB in %s", str(self.dir))
+        logging.debug(f"Making a {self.__class__.__name__}DB in %s", str(self.dir))
         if not self.dir.exists():
             self.dir.mkdir()
         self._segment_size = segment_size
@@ -131,7 +133,7 @@ class StateKeeper:
         # update cache
         if namespace not in self._state:
             self._state[namespace] = [0, {}]
-        self._state[namespace][0].update(kvdict)
+        self._state[namespace][0] = seqno
         self._state[namespace][1].update(kvdict)
 
     def _read_ns(self, namespace: str):
@@ -269,6 +271,7 @@ class StateKeeper:
         state = { ns: {} for ns in nspaces }
         sentfirst = False
         while curseg < self.seq // self.segment_size:
+            logging.debug("Traversing segment %d", curseg)
             cursors = { ns: self._segfile_reader(f.open()) for ns, f in  _existing_segfiles(nspaces, curseg) }
             current = { ns: next(cursors[ns]) for ns in cursors }
             while cursors:
@@ -277,7 +280,7 @@ class StateKeeper:
                 ns, (minseq, data) = min(current.items(), key=lambda i: i[1][0])
                 # coalesce any cross-namespace updates
                 ## as long as there's a current item with tha seq
-                while any(current[k][0] == minseq):
+                while any(current[k][0] == minseq for k in current):
                     ns, (seq, data) = min(current.items(), key=lambda i: i[1][0])
                     ## update the current item for that ns
                     current[ns] = next(cursors[ns], None)
@@ -286,22 +289,24 @@ class StateKeeper:
                         del current[ns]
                         del cursors[ns]
                     delta[ns] = data
+                logging.debug("Delta is %r", delta)
                 # figure out what to return
                 if key is None:
                     ## no key, return the full change
                     yield seq, delta
                 else:
                     ## apply the delta
-                    state[ns].update(delta)
+                    state.update(delta)
+                    logging.debug("state updated to %r", state)
                     if not sentfirst:
                         if seq >= start_seqno:
                             # we're due, but havent sent the first update 
                             # (which should show key state then even if NOTFOUND)
                             # so do so, and mark it done
-                            yield start_seqno, { ns: state[ns].get(key, NOTFOUND) for ns in nspaces }
+                            yield start_seqno, { ns: { key: state[ns].get(key, NOTFOUND) } for ns in nspaces }
                             sentfirst = True
                         # trim kept state to what we care about
-                        state = { ns: state[ns].get(key, NOTFOUND) for ns in delta }
+                        state = { ns: { key: state[ns].get(key, NOTFOUND) } for ns in nspaces }
                     else:
                         # non-initial update, only show changes to the key we're interested in
                         # trim the delta to only updates we care about
@@ -315,7 +320,7 @@ class StateKeeper:
                             yield seq, delta
             curseg += 1
 
-
+Kehinde = StateKeeper
 
 
 class MultiWrite:

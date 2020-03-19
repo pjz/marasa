@@ -12,15 +12,15 @@ logging.getLogger().setLevel(logging.DEBUG)
 
 @pytest.fixture
 def statekeeper(tmpdir):
-    yield StateKeeper(str(tmpdir), epoch_size=5)
+    yield StateKeeper(str(tmpdir), segment_size=5)
 
 @pytest.fixture
 def elmulti(tmpdir):
-    yield EventLogMulti(str(tmpdir), epoch_size=5)
+    yield EventLogMulti(str(tmpdir), segment_size=5)
 
 @pytest.fixture
 def elsingle(tmpdir):
-    yield EventLogSingle(str(tmpdir), json.dumps, json.loads, epoch_size=5)
+    yield EventLogSingle(str(tmpdir), json.dumps, json.loads, segment_size=5)
 
 
 

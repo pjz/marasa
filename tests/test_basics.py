@@ -46,3 +46,12 @@ def test_multi_ns(statekeeper):
         assert db.get('ns1', 'k', s) == ns1_middle
 
 
+    for seq, data in db.read(1, key='k'):
+        foundin = 0
+        for ns in data:
+            if data[ns]['k'] == db.NOTFOUND: continue
+            foundin += 1
+            assert data[ns]['k'] == ((seq-1)//6 ) * 10 + (seq-1) % 6
+
+        assert foundin == 1
+
