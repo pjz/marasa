@@ -1,23 +1,22 @@
 
-# replay me these message types from this point in time, in order [and maybe continue in real time]
-# get me the latest of this message type
+from .constants import NOTFOUND
 
 class EventLogSingle:
     """
     EventLog stores a series of events, written to what is essentially a single logfile.
-    The logfile is segmented into at most :epoch_size: lines.
+    The logfile is segmented into at most :segment_size: lines.
     Each line consists of a sequence number followed by a space followed by the json representation of the changes
     made.
     """
 
-    def __init__(self, storage_dir: Union[Path, str], basename: str, serializer, deserializer, epoch_size=10000):
+    def __init__(self, storage_dir: Union[Path, str], basename: str, serializer, deserializer, segment_size=10000):
         """
         :storage_dir: is the directory to store log files in
         :basename: the name prefix events are stored in under storage_dir
         :serializer: a single-argument function that can serialize any events handed to write().  IMPORTANT: the output
         must NOT contain newlines!
         :deserializer: a single-argument function that can deserialize the output of :serializer:
-        :epoch_size: is how many records to store per file; the default is 10000, so if average change size is 1KB, that's
+        :segment_size: is how many records to store per file; the default is 10000, so if average change size is 1KB, that's
         a 10MB file
         """
         self.dir = storage_dir if isinstance(storage_dir, Path) else Path(storage_dir)
@@ -25,7 +24,7 @@ class EventLogSingle:
         logging.debug("Making a MarasaDB in %s", str(self.dir))
         if not self.dir.exists():
             self.dir.mkdir()
-        self.epoch_size = epoch_size
+        self.segment_size = segment_size
         self._seq = self.reload()
         self.serialize = serializer
         self.deserialize = deserializer
@@ -75,7 +74,7 @@ class EventLogSingle:
         If seq is None, get the latest one.
         If there is no such namespace, or it's empty at or before that seq, return None
         """
-        seg = seq // self.epoch_size if seq is not None else None
+        seg = seq // self.segment_size if seq is not None else None
         biggest = (-1, None)
         for f in self._segfiles():
             fileseg = int(f.name.split('.')[-1])
@@ -92,24 +91,13 @@ class EventLogSingle:
         """write to a single file
         """
         # figure out the file to write to
-        segfile = self._segfile_for_seg(seqno // self.epoch_size)
+        segfile = self._segfile_for_seg(seqno // self.segment_size)
         mode = 'a' if segfile.exists() else 'w'
         # write it out
         with segfile.open(mode) as f:
             dataline = f"{seqno!s} {typestr} {data}\n"
             f.write(dataline)
         self._cur = data
-
-    def reindex(self):
-        index = []
-        for sf in self._segfiles():
-            with sf.open() as f:
-                first, typestr = None, None
-                for seqno, tstr, data in self._segfile_reader(f):
-                    if first is None: first = seqno
-                    if typestr is None: typestr = tstr
-                index.append((first, typestr, f.name))
-        self._indexes = sorted(index, key=lambda i: i[0])
 
     def reload(self):
         latest = 0
@@ -141,12 +129,10 @@ class EventLogSingle:
         # read from a point in history
         with self._segfile_for_seq(seqno).open() as f:
             for seq, _, data in self._segfile_reader(f):
-                if seq < seqno:
-                    continue
-                elif seq == seqno:
-                    return data
-                else:
+                if seq > seqno:
                     break
+                if seq == seqno:
+                    return data
         return NOTFOUND
 
     def read(self, start_seqno: int, typenames=None):
@@ -171,9 +157,9 @@ class EventLogSingle:
                 yield seq, self.deserialize(data)
 
         # now send subsequent segments
-        curseg = ( start_seqno // self.epoch_size )
+        curseg = ( start_seqno // self.segment_size )
         ## use a lambda for lastseg b/c self.seq could change while looping
-        lastseg = lambda : self.seq // self.epoch_size
+        lastseg = lambda : self.seq // self.segment_size
         while curseg < lastseg():
             curseg += 1
             segfile = self._segfile_for_seg(curseg)

@@ -1,6 +1,5 @@
 
-from . import Marasa
-
+from .constants import NOTFOUND
 
 # replay me these message types from this point in time, in order [and maybe continue in real time]
 # get me the latest of this message type
@@ -198,7 +197,7 @@ class EventLogMulti:
         types = self._types() if typenames is None else typenames
         curseg = ( start_seqno // self.segment_size )
         while curseg < self.seq // self.segment_size:
-            cursors = { t: self._segfile_reader(f.open()) for t, f in  _existing_segfiles(types, curseg) }
+            cursors = { t: self._segfile_reader(f.open()) for t, f in _existing_segfiles(types, curseg) }
             latest = { t: next(cursors[t]) for t in cursors }
             while cursors:
                 seq, t, data = min(latest.values(), key=lambda i: i[0])

@@ -1,6 +1,7 @@
 
 
-def test_single_ns(db):
+def test_single_ns(statekeeper):
+    db = statekeeper
 
     NS = 'ns'
 
@@ -17,12 +18,17 @@ def test_single_ns(db):
         v = db.get(NS, key='k', seqno=i)
         assert v == i-1
 
-    # ensure that read() works
-    for s, d in db.read(NS, 1, 'k'):
+    # ensure that read_ns() works
+    for s, d in db.read_ns(NS, 1, 'k'):
         assert d == s-1
 
+    for s, d in db.read(1, key='k'):
+        assert NS in d
+        assert d[NS]['k'] == s-1
 
-def test_multi_ns(db):
+
+def test_multi_ns(statekeeper):
+    db = statekeeper
 
     namespaces = ('ns1', 'ns2', 'ns3', 'ns2', 'ns1')
 
