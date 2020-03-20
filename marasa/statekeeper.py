@@ -7,6 +7,12 @@ import orjson as json
 
 from .constants import NOTFOUND
 
+
+class StateDict(dict):
+    # A dict that can track the seqno it comes from
+    seq = 0
+
+
 class StateKeeper:
     """
     StateKeeper stores data as a series of changes, written to what are essentially logfiles.
@@ -28,7 +34,7 @@ class StateKeeper:
         if not self.dir.exists():
             self.dir.mkdir()
         self._segment_size = segment_size
-        self._state: Dict[str, List[ int, Dict[str, Any]]] = {}
+        self._state: Dict[str, StateDict] = dict()
         self._seq = self.reload()
 
     @property
@@ -119,11 +125,11 @@ class StateKeeper:
         if not segfile.exists():
             #  create it, and store a full snapshot in it
             mode = 'w'
-            data = self._state.get(namespace, [0, {}])[1].copy()
+            data: Dict = self._state.get(namespace, {}).copy()
         else:
             # append to it, only the changes
             mode = 'a'
-            data = {}
+            data = dict()
         # apply the changes to what's to be stored
         data.update(kvdict)
         # write it out
@@ -132,9 +138,9 @@ class StateKeeper:
             f.write(dataline)
         # update cache
         if namespace not in self._state:
-            self._state[namespace] = [0, {}]
-        self._state[namespace][0] = seqno
-        self._state[namespace][1].update(kvdict)
+            self._state[namespace] = StateDict()
+        self._state[namespace].seq = seqno
+        self._state[namespace].update(kvdict)
 
     def _read_ns(self, namespace: str):
         """Return a tuple of the last seqno and the latest state for the specified namespace"""
@@ -162,7 +168,7 @@ class StateKeeper:
             if self.seq and last != self.seq:
                 raise IOError  # database inconsistent
         # get the value(s) from the cache
-        value = self._state.get(namespace, [0, {}])[1]
+        value = self._state.get(namespace, StateDict())
         if key is None:
             return value
         return value.get(key, NOTFOUND)
@@ -176,7 +182,6 @@ class StateKeeper:
 
     def _read_history(self, namespace, key, seqno):
         # see if we can cheat
-        # TODO: track last-update of each subitem in ._state
         if seqno == self.seq:
             return self._read_cur(namespace, key)
         logging.debug("looking in history")
@@ -268,7 +273,7 @@ class StateKeeper:
 
         nspaces = self._namespaces() if namespaces is None else namespaces
         curseg = ( start_seqno // self.segment_size )
-        state = { ns: {} for ns in nspaces }
+        state: Dict[str, Dict[str, Any]] = { ns: {} for ns in nspaces }
         sentfirst = False
         while curseg < self.seq // self.segment_size:
             logging.debug("Traversing segment %d", curseg)

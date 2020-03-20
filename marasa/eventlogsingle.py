@@ -35,10 +35,11 @@ class EventLogSingle:
         if not self.dir.exists():
             self.dir.mkdir()
         self.segment_size = segment_size
-        self._seq = self.reload()
         self.serialize = serializer
         self.deserialize = deserializer
         self._cur: Datum = NOTFOUND
+        self._seq: int = 0
+        self.reload()
 
     @property
     def seq(self) -> int:
@@ -106,7 +107,7 @@ class EventLogSingle:
             f.write(dataline)
         self._cur = data
 
-    def reload(self) -> int:
+    def reload(self):
         latest = 0
         cur: Datum = NOTFOUND
         segfile = self._segfile_for_seq()
@@ -115,14 +116,12 @@ class EventLogSingle:
         for seq, _, data in self._segfile_reader(segfile):
             latest, cur = seq, data
         self._cur = cur
-        return latest
+        self._seq = latest
 
     def _read_cur(self):
         if self._cur == NOTFOUND:
             # repop the cache by reading all namespaces
-            last = self.reload()
-            if self.seq and last != self.seq:
-                raise IOError  # database inconsistent
+            self.reload()
         return self._cur
 
     @staticmethod
