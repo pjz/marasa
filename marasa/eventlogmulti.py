@@ -1,7 +1,7 @@
 
 import logging
 from pathlib import Path
-from typing import Union, Optional, Dict, Any, List, Callable, TypeVar, Tuple
+from typing import Union, Optional, Dict, Any, List, Callable, TypeVar, Tuple, Iterable
 
 from .constants import NOTFOUND, NotFound
 
@@ -32,7 +32,7 @@ class EventLogMulti:
         :segment_size: is how many records to store per file; the default is 10000, so if average change size is 1KB, that's
         a 10MB file
         """
-        self.dir = storage_dir if isinstance(storage_dir, Path) else Path(storage_dir)
+        self.__dir = storage_dir if isinstance(storage_dir, Path) else Path(storage_dir)
         logging.debug(f"Making a {self.__class__.__name__}DB in %s", str(self.dir))
         if not self.dir.exists():
             self.dir.mkdir()
@@ -45,19 +45,23 @@ class EventLogMulti:
         self.reload()
 
     @property
+    def dir(self) -> Path:
+        return self.__dir
+
+    @property
     def seq(self) -> int:
         """The last sequence number used for a record.  Non-writable. Zero (0) means no records yet written."""
         return self._seq
 
-    def put(self, event: YourEventType) -> int:
+    def put(self, event: YourEventType, typestr=None) -> int:
         """
         save the specified :event
         return the seqno it was saved at
         """
-        self._seq += 1
-        typestr = type(event).__name__
-        self._write(self._seq, typestr, self.serialize(event))
-        return self._seq
+        seq = self._seq =  self._seq + 1
+        typestr = type(event).__name__ if typestr is None else typestr
+        self._write(seq, typestr, self.serialize(event))
+        return seq
 
     def get(self, msgtypes: Optional[List[str]]=None, seqno: Optional[int]=None) -> Union[YourEventType, NotFound]:
         """
@@ -66,12 +70,13 @@ class EventLogMulti:
         :seqno: get value at or before the specified sequence number.  If unspecified, get the current value
         if no event matches, return NOTFOUND
         """
+        msgtypenames = self._types() if msgtypes is None else self._types_to_names(msgtypes)
         if seqno is None:
-            result = self._get_cur(msgtypes)
+            result = self._get_cur(msgtypenames)
         elif seqno < 1:
             raise ValueError("Sequence numbers are never lower than 1")
         else:
-            result = self._get_history(msgtypes, seqno)
+            result = self._get_history(msgtypenames, seqno)
         if isinstance(result, NotFound):
             return NOTFOUND
         return self.deserialize(result)
@@ -85,7 +90,7 @@ class EventLogMulti:
 
     def _segfiles(self, typestr=None):
         prefix = '*' if typestr is None else typestr
-        return self.dir.glob('{prefix}.*')
+        return self.dir.glob(f'{prefix}.*')
 
     def _types(self):
         return set(f.name.rsplit('.', 1)[0] for f in self._segfiles())
@@ -126,13 +131,13 @@ class EventLogMulti:
             if seqno > latest[t][0]:
                 latest[t] = (seqno, data)
         self._cur = latest
-        self._seq = max(latest[t][0] for t in latest)
+        self._seq = max(latest[t][0] for t in latest) if latest else 0
 
     def _segfile_for_seg(self, typestr, seg) -> Path:
         """Segfile for the specified segment.  None if it doesn't exist."""
         return self.dir / f"{typestr}.{seg:09}"
 
-    def _write(self, seqno: int, typestr, data):
+    def _write(self, seqno: int, typestr: str, data):
         """write to a single file
         """
         # figure out the file to write to
@@ -142,28 +147,33 @@ class EventLogMulti:
         with segfile.open(mode) as f:
             dataline = f"{seqno!s} {typestr} {data}\n"
             f.write(dataline)
+        logging.debug("wrote type %r event %r as seqno %r", typestr, data, seqno)
         self._cur[typestr] = (seqno, data)
 
     def _get_cur(self, msgtypes: Optional[List[str]]) -> Datum:
         if not self._cur:
+            logging.debug(f"_cur unset, reloading")
             self.reload()
         if not self._cur:
+            logging.debug(f"_cur unset after reload; empty db. NOTFOUND")
             return NOTFOUND
         if msgtypes is None:
             which = max(self._cur.values(), key=lambda e: e[0])
+            logging.debug(f"most recent of all _cur is {which})")
         else:
             which = max((self._cur[t] for t in msgtypes), key=lambda e:e[0])
+            logging.debug(f"most recent of allowed _cur is {which})")
         return which[1]
 
-    def _get_history(self, msgtypes: Optional[List[str]], seqno: int) -> Datum:
-        if seqno == self.seq:
-            return self._get_cur(msgtypes)
-        logging.debug("looking in history of {msgtype}")
+    def _get_history(self, msgtypenames: Optional[List[str]], seqno: int) -> Datum:
+        checktypes = msgtypenames if msgtypenames is not None else self._types()
+        logging.debug(f"looking in history of {msgtypenames!r} ({checktypes!r})")
         result = NOTFOUND
         # read from a point in history
-        for t in self._types():
+        for t in checktypes:
             segfile = self._segfile_for_seqno(t, seqno)
             if segfile is None: continue
+            logging.debug(f"history of type {t!r} in segfile {segfile}")
             with segfile.open() as f:
                 for seq, _, data in self._segfile_reader(f):
                     if seq < seqno:
@@ -174,34 +184,14 @@ class EventLogMulti:
                         break
         return NOTFOUND # if that seqno is missing
 
-    def _read_type(self, start_seqno: int, typename: str):
-        segfile = self._segfile_for_seqno(typename, start_seqno)
-        # if nonexistant, send NOTFOUND
-        if segfile is None:
-            yield start_seqno, NOTFOUND
-            return
-        # find the spot in the first segfile and read the rest of it
-        with segfile.open() as f:
-            for seq, _, data in self._segfile_reader(f):
-                if seq < start_seqno:
-                    continue
-                yield seq, self.deserialize(data)
+    @staticmethod
+    def _types_to_names(typelist):
+        return list(t.__name__ for t in typelist)
 
-        # now send subsequent segments
-        curseg = ( start_seqno // self.segment_size )
-        while curseg < self.seq // self.segment_size:
-            curseg += 1
-            segfile = self._segfile_for_seg(typename, curseg)
-            if not segfile.exists(): continue
-            with segfile.open() as f:
-                for seq, _, data in self._segfile_reader(f):
-                    yield seq, self.deserialize(data)
-
-
-    def read(self, start_seqno: int, typenames=None):
+    def read(self, start_seqno: int, msgtypes=None) -> Iterable[Tuple[int, Union[YourEventType, NotFound]]]:
         """
         return a generator that will return the initial event and all subsequent events
-        of the specified type names (or all types if typenames is unspecified)
+        of the specified type names (or all types if msgtypes is unspecified)
         If the specifie sequence number doesn't exist, NOTFOUND will be returned
         """
 
@@ -210,13 +200,13 @@ class EventLogMulti:
                 segfile = self._segfile_for_seg(t, segno)
                 if segfile.exists():
                     yield t, segfile
-
-        types = self._types() if typenames is None else typenames
+        types = self._types() if msgtypes is None else self._types_to_names(msgtypes)
         curseg = ( start_seqno // self.segment_size )
         while curseg < self.seq // self.segment_size:
             cursors = { t: self._segfile_reader(f.open()) for t, f in _existing_segfiles(types, curseg) }
             latest = { t: next(cursors[t]) for t in cursors }
             while cursors:
+                logging.debug(f"segment {curseg}: {latest!r}")
                 seq, t, data = min(latest.values(), key=lambda i: i[0])
                 latest[t] = next(cursors[t], None)
                 if latest[t] is None:
