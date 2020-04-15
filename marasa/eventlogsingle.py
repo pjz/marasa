@@ -1,6 +1,7 @@
+import re
 import logging
 from pathlib import Path
-from typing import Union, Optional, Dict, Any, List, Callable, TypeVar, Iterable, Tuple
+from typing import Union, Optional, TypeVar, Iterable, Tuple
 
 from .constants import NotFound, NOTFOUND
 
@@ -10,24 +11,18 @@ Datum = Union[NotFound, str]
 
 class EventLogSingle:
     """
-    EventLog stores a series of events, written to what is essentially a single logfile.
-    The logfile is segmented into at most :segment_size: lines.
+    EventLog stores a series of events, written to a single logfile.
+    The logfile is segmented into pieces with at most :segment_size: lines.
     Each line consists of a sequence number followed by a space followed by the json representation of the changes
     made.
     """
 
-    def __init__(self, storage_dir: Union[Path, str], basename: str,
-                 serializer: Callable[[YourEventType], str],
-                 deserializer: Callable[[str], YourEventType],
-                 segment_size: int =10000):
+    def __init__(self, storage_dir: Union[Path, str], basename: str = 'log', segment_size: int =10000):
         """
         :storage_dir: is the directory to store log files in
-        :basename: the name prefix events are stored in under storage_dir
-        :serializer: a single-argument function that can serialize any events handed to write().  IMPORTANT: the output
-        must NOT contain newlines!
-        :deserializer: a single-argument function that can deserialize the output of :serializer:
-        :segment_size: is how many records to store per file; the default is 10000, so if average change size is 1KB, that's
-        a 10MB file
+        :basename: the name prefix events are stored in under storage_dir ('log' by default)
+        :segment_size: is how many records to store per file; the default is 10000,
+        so if average change size is 1KB, that's a 10MB file
         """
         self.dir = storage_dir if isinstance(storage_dir, Path) else Path(storage_dir)
         self.name = basename
@@ -35,8 +30,6 @@ class EventLogSingle:
         if not self.dir.exists():
             self.dir.mkdir()
         self.segment_size = segment_size
-        self.serialize = serializer
-        self.deserialize = deserializer
         self._cur: Datum = NOTFOUND
         self._seq: int = 0
         self.reload()
@@ -52,7 +45,7 @@ class EventLogSingle:
         return the seqno it was saved at
         """
         self._seq += 1
-        self._write(self._seq, type(event).__name__, self.serialize(event))
+        self._write(self._seq, tag, event)
         return self._seq
 
     def get(self, seqno: Optional[int]=None) -> YourEventType:
@@ -95,7 +88,7 @@ class EventLogSingle:
                 biggest = (fileseg, f)
         return biggest[1]
 
-    def _write(self, seqno: int, typestr: str, data: str):
+    def _write(self, seqno: int, data: str):
         """write to a single file
         """
         # figure out the file to write to
@@ -103,7 +96,7 @@ class EventLogSingle:
         mode = 'a' if segfile.exists() else 'w'
         # write it out
         with segfile.open(mode) as f:
-            dataline = f"{seqno!s} {typestr} {data}\n"
+            dataline = f"{seqno!s} {data}\n"
             f.write(dataline)
         self._cur = data
 
@@ -127,9 +120,9 @@ class EventLogSingle:
     @staticmethod
     def _segfile_reader(fh):
         for line in fh:
-            seqno, typestr, jdata = line.split(' ', 2)
-            logging.debug("segfile returning %r %r %r", seqno, typestr, jdata)
-            yield int(seqno), typestr, jdata
+            seqno, data = line.split(' ', 1)
+            logging.debug("segfile returning %r %r", seqno, data)
+            yield int(seqno), data
 
     def _read_history(self, seqno):
         if seqno == self.seq:
@@ -147,13 +140,13 @@ class EventLogSingle:
                 elif seq > seqno:
                     break
 
-    def read(self, start_seqno: int, typenames=None) -> Iterable[Tuple[int, Union[YourEventType, NotFound]]]:
+    def read(self, start_seqno: int) -> Iterable[Tuple[int, Union[YourEventType, NotFound]]]:
         """
-        return a generator that will return (seqence number, event) tuples for the
-        initial event and all subsequent events of the specified type names (or
-        all types if typenames is unspecified)
-        If the specifie sequence number doesn't exist, NOTFOUND will be returned
+        Return a generator that will return (seqence number, event) tuples for the
+        initial event and all subsequent events
+        If the specified sequence number doesn't exist, NOTFOUND will be returned
         """
+
         segfile = self._segfile_for_seq(start_seqno)
         # if nonexistant, send NOTFOUND
         if segfile is None:
@@ -162,12 +155,10 @@ class EventLogSingle:
 
         # send the partial segment the staring seqno is in
         with segfile.open() as f:
-            for seq, tstr, data in self._segfile_reader(f):
+            for seq, data in self._segfile_reader(f):
                 if seq < start_seqno:
                     continue
-                if typenames is not None and tstr not in typenames:
-                    continue
-                yield seq, self.deserialize(data)
+                yield seq, data
 
         # now send subsequent segments
         curseg = ( start_seqno // self.segment_size )
@@ -178,10 +169,8 @@ class EventLogSingle:
             segfile = self._segfile_for_seg(curseg)
             if not segfile.exists(): continue
             with segfile.open() as f:
-                for seq, tstr, data in self._segfile_reader(f):
-                    if typenames is not None and tstr not in typenames:
-                        continue
-                    yield seq, self.deserialize(data)
+                for seq, data in self._segfile_reader(f):
+                    yield seq, data
 
 
 
