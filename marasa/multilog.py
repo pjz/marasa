@@ -11,9 +11,9 @@ YourEventType = TypeVar('YourEventType')
 # serialized data
 Datum = Union[NotFound, str]
 
-class EventLogMulti:
+class MultiLog:
     """
-    EventLogMulti stores a series of events, in a set of logfiles that are partitioned by tag
+    MultiLog stores a series of events, in a set of logfiles that are partitioned by tag
     The logfiles are segmented so each has at most :segment_size: lines.
     Each line consists of a sequence number, a space, the tag, another space, and the serialized event
     """
@@ -212,7 +212,7 @@ class EventLogMulti:
             curseg += 1
 
 
-Taimo = EventLogMulti
+Taimo = MultiLog
 
 
 

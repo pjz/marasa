@@ -1,9 +1,8 @@
 
 from .statekeeper import StateKeeper, Kehinde
-from .eventlogmulti import EventLogMulti, Taimo
-from .eventlogsingle import EventLogSingle
+from .multilog import MultiLog, Taimo
+from .monolog import MonoLog
 from .constants import NOTFOUND
 
-Taimo, Kehinde, StateKeeper, EventLogMulti, EventLogSingle, NOTFOUND
-
+Taimo, Kehinde, StateKeeper, MultiLog, MonoLog, NOTFOUND
 

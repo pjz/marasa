@@ -4,7 +4,7 @@ import logging
 
 import pytest
 
-from marasa import StateKeeper, EventLogSingle, EventLogMulti
+from marasa import StateKeeper, MonoLog, MultiLog
 
 # show debug-level logging
 # TODO: figure out how to toggle this with a simple decorator
@@ -17,11 +17,11 @@ def statekeeper(tmpdir):
 
 @pytest.fixture
 def elmulti(tmpdir):
-    yield EventLogMulti(str(tmpdir), segment_size=5)
+    yield MultiLog(str(tmpdir), segment_size=5)
 
 @pytest.fixture
 def elsingle(tmpdir):
-    yield EventLogSingle(str(tmpdir), segment_size=5)
+    yield MonoLog(str(tmpdir), segment_size=5)
 
 
 

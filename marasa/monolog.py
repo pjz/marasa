@@ -9,9 +9,9 @@ YourEventType = TypeVar('YourEventType')
 
 Datum = Union[NotFound, str]
 
-class EventLogSingle:
+class MonoLog:
     """
-    EventLog stores a series of events, written to a single logfile.
+    MonoLog stores a series of events, written to a single logfile.
     The logfile is segmented into pieces with at most :segment_size: lines.
     Each line consists of a sequence number followed by a space followed by the json representation of the changes
     made.
