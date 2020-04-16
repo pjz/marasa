@@ -48,10 +48,10 @@ class MultiLog:
         """
         return self._seq
 
-    def put(self, tag, event) -> int:
+    def put(self, event, tag) -> int:
         """
-        save the specified :event
-        return the seqno it was saved at
+        Save the specified :event under the specified tag.
+        Return the seqno it was saved at.
         """
         seq = self._seq = self._seq + 1
         self._write(seq, tag, event)
@@ -59,7 +59,7 @@ class MultiLog:
 
     def get(self, tags: Optional[List[str]] = None, seqno: Optional[int] = None) -> Union[YourEventType, NotFound]:
         """
-        fetch an event
+        Fetch an event
         :tags: limit the events to those with one of these tags.  If unspecified, any will do.
         :seqno: get value at or before the specified sequence number.  If unspecified, get the current value
         if no event matches, return NOTFOUND
@@ -180,7 +180,7 @@ class MultiLog:
 
     def read(self, start_seqno: int, tags: Optional[List[str]] = None) -> Iterable[Tuple[int, Union[YourEventType, NotFound]]]:
         """
-        Return a generator that will return the initial event and all subsequent events
+        Return a generator that will return tuples (seqno, tag, data)
         If tags is a list, the events must have one of those tags.
         If tags is a string, it is treated as a regex that the tags must match.
         If tags is None or unspecified, all events are returned.
@@ -208,12 +208,80 @@ class MultiLog:
                 if latest[tag] is None:
                     del latest[tag]
                     del cursors[tag]
-                yield seq, data
+                yield seq, tag, data
             curseg += 1
 
 
 Taimo = MultiLog
 
 
+class SerializingMultiLog(MultiLog):
+    """
+    SerializingMultiLog is a MultiLog that with put/get/read wrapped that do automatic serialization
+    and deserialization for you.
+    To this end, a couple things have changed:
 
+        .put() now has 'tag' as an optional keyword argument - the default is event.__class__.__name__
+        .read() now has an optional 'with_tags' keyword argument that determines whether the resultant
+            generated tuples are (seqno, tag, event) or (seqno, event)
+        .get() and .read() accept lists of objects as well as strings, and those objects' __name__s are
+            used as the tag names to match
+    """
+
+    def __init__(self, storage_dir: Union[Path, str], serializer, deserializer, segment_size: int = 10000):
+        """
+        :storage_dir: is the directory to store log files in
+        :segment_size: is how many records to store per file; the default is 10000,
+        so if average change size is 1KB, that's a 10MB file
+        """
+        super().__init__(storage_dir, segment_size=segment_size)
+        self.serialize = serializer
+        self.deserialize = deserializer
+
+    def put(self, event, tag=None) -> int:
+        """
+        Save the specified :event under the specified tag;
+        if no tag is specified, use event.__class__.__name__.
+        Return the seqno it was saved at.
+        """
+        if tag is None: tag = event.__class__.__name__
+        data = self.serialize(event)
+        return super().put(data, tag)
+
+    @staticmethod
+    def _xlate_tags(taglist):
+        """
+        translate list of strings or list of classes or mixed to a list of strings
+        """
+        if taglist is None:
+            return None
+        msgtags = []
+        for tag in taglist:
+            if isinstance(tag, str):
+                msgtags.append(tag)
+            else:
+                msgtags.append(tag.__name__)
+        return msgtags
+
+    def get(self, tags: Optional[List[str]] = None, seqno: Optional[int] = None) -> Union[YourEventType, NotFound]:
+        """
+        Fetch an event
+        :tags: limit the events to those with one of these tags.  If unspecified, any will do.
+        If the list is not of strings, the tags will be their .__name__s (so passing in classes will work)
+        :seqno: get value at or before the specified sequence number.  If unspecified, get the current value
+        if no event matches, return NOTFOUND
+        """
+        msgtags = self._xlate_tags(tags)
+        result = super().get(tags=msgtags, seqno=seqno)
+        if result == NOTFOUND:
+            return result
+        return self.deserialize(result)
+
+    def read(self, start_seqno: int, tags: Optional[List[str]] = None, with_tags: bool = False) -> Iterable[Tuple[int, Union[YourEventType, NotFound]]]:
+        msgtags = self._xlate_tags(tags)
+        for seq, tag, data in super().read(start_seqno, tags=tags):
+            if with_tags:
+                yield seq, tag, self.deserialize(data)
+            else:
+                yield seq, self.deserialize(data)
 

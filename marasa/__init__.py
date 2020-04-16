@@ -1,6 +1,6 @@
 
 from .statekeeper import StateKeeper, Kehinde
-from .multilog import MultiLog, Taimo
+from .multilog import SerializingMultiLog, MultiLog, Taimo
 from .monolog import MonoLog
 from .constants import NOTFOUND
 
