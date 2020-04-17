@@ -1,5 +1,6 @@
 import re
 import logging
+import contextlib
 from pathlib import Path
 from typing import Union, Optional, Dict, List, TypeVar, Tuple, Iterable
 
@@ -20,7 +21,7 @@ class MultiLog:
 
     NOTFOUND = NOTFOUND
 
-    def __init__(self, storage_dir: Union[Path, str], segment_size: int = 10000):
+    def __init__(self, storage_dir: Union[Path, str], segment_size: int = 10000, lock = None):
         """
         :storage_dir: is the directory to store log files in
         :segment_size: is how many records to store per file; the default is 10000,
@@ -34,6 +35,7 @@ class MultiLog:
         # self._cur is a dict of tag: (seqno, msg), so we can find most recent of any tag easily
         self._cur: Dict[str, Tuple[int, Datum]] = dict()
         self._seq: int = 0
+        self.writelock = contextlib.nullcontext() if lock is None else lock
         self.reload()
 
     @property
@@ -53,9 +55,10 @@ class MultiLog:
         Save the specified :event under the specified tag.
         Return the seqno it was saved at.
         """
-        seq = self._seq = self._seq + 1
-        self._write(seq, tag, event)
-        return seq
+        with self.writelock:
+            seq = self._seq = self._seq + 1
+            self._write(seq, tag, event)
+            return seq
 
     def get(self, tags: Optional[List[str]] = None, seqno: Optional[int] = None) -> Union[YourEventType, NotFound]:
         """
