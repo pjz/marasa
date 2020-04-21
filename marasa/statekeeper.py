@@ -1,6 +1,5 @@
 
 import logging
-import contextlib
 from pathlib import Path
 from typing import Union, Optional, Dict, Any, List
 
@@ -24,7 +23,7 @@ class StateKeeper:
 
     NOTFOUND = NOTFOUND
 
-    def __init__(self, storage_dir: Union[Path, str], segment_size=10000, lock=None):
+    def __init__(self, storage_dir: Union[Path, str], segment_size=10000):
         """
         :storage_dir: is the directory to store log files in
         :segment_size: is how many records to store per file; the default is 10000, so if average change size is 1KB, that's
@@ -37,7 +36,6 @@ class StateKeeper:
         self._segment_size = segment_size
         self._state: Dict[str, StateDict] = dict()
         self._seq = self.reload()
-        self.writelock = contextlib.nullcontext() if lock is None else lock
 
     @property
     def seq(self):
@@ -54,10 +52,9 @@ class StateKeeper:
         update the set of key/value pairs in kvdict in the namespace
         return the seqno the update was applied in
         """
-        with self.writelock:
-            self._seq += 1
-            self._write(namespace, self._seq, kvdict)
-            return self._seq
+        self._seq += 1
+        self._write(namespace, self._seq, kvdict)
+        return self._seq
 
     def multiwrite(self, ns_kvdict):
         """
@@ -65,11 +62,10 @@ class StateKeeper:
         :ns_kvdict: a dictionary of namespace to kvdicts to update
         return the seqno the update was applied in
         """
-        with self.writelock:
-            self._seq += 1
-            for ns in ns_kvdict:
-                self._write(ns, self._seq, ns_kvdict[ns])
-            return self._seq
+        self._seq += 1
+        for ns in ns_kvdict:
+            self._write(ns, self._seq, ns_kvdict[ns])
+        return self._seq
 
     def get(self, namespace: str, key: Optional[str]=None, seqno: Optional[int]=None):
         """

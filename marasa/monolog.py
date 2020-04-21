@@ -1,6 +1,5 @@
 import re
 import logging
-import contextlib
 from pathlib import Path
 from typing import Union, Optional, TypeVar, Iterable, Tuple
 
@@ -18,7 +17,7 @@ class MonoLog:
     made.
     """
 
-    def __init__(self, storage_dir: Union[Path, str], basename: str = 'log', segment_size: int = 10000, lock = None):
+    def __init__(self, storage_dir: Union[Path, str], basename: str = 'log', segment_size: int =10000):
         """
         :storage_dir: is the directory to store log files in
         :basename: the name prefix events are stored in under storage_dir ('log' by default)
@@ -33,7 +32,6 @@ class MonoLog:
         self.segment_size = segment_size
         self._cur: Datum = NOTFOUND
         self._seq: int = 0
-        self.writelock = contextlib.nullcontext() if lock is None else lock
         self.reload()
 
     @property
@@ -46,10 +44,9 @@ class MonoLog:
         save the specified event
         return the seqno it was saved at
         """
-        with self.writelock:
-            self._seq += 1
-            self._write(self._seq, event)
-            return self._seq
+        self._seq += 1
+        self._write(self._seq, tag, event)
+        return self._seq
 
     def get(self, seqno: Optional[int]=None) -> YourEventType:
         """
@@ -62,7 +59,7 @@ class MonoLog:
             raise ValueError("Sequence numbers are never lower than 1")
         else:
             result = self._read_history(seqno)
-        return result
+        return self.deserialize(result)
 
     def _segfiles(self):
         return self.dir.glob('{self.name}.*')
