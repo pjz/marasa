@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 from typing import Union, Optional, Dict, List, TypeVar, Tuple, Iterable
 
+from .mixins import AsyncSafeLogMixin, ThreadSafeLogMixin
 from .constants import NOTFOUND, NotFound
 
 # Placeholder for the user's event data
@@ -146,45 +147,43 @@ class MultiLog:
 
     def _get_cur(self, tags: Optional[List[str]]) -> Datum:
         if not self._cur:
-            logging.debug(f"_cur unset, reloading")
+            logging.debug("_cur unset, reloading")
             self.reload()
         if not self._cur:
-            logging.debug(f"_cur unset after reload; empty db. NOTFOUND")
+            logging.debug("_cur unset after reload; empty db. NOTFOUND")
             return NOTFOUND
         if tags is None:
             which = max(self._cur.values(), key=lambda e: e[0])
-            logging.debug(f"most recent of all _cur is {which})")
+            logging.debug("most recent of all _cur is %r)", which)
         else:
             which = max((self._cur[t] for t in tags), key=lambda e:e[0])
-            logging.debug(f"most recent of allowed _cur is {which})")
+            logging.debug("most recent of allowed _cur is %r)", which)
         return which[1]
 
     def _get_history(self, tags: Optional[List[str]], seqno: int) -> Datum:
         msgtags = self._tags() if tags is None else tags
-        logging.debug(f"looking in history of {tags!r} ({msgtags!r})")
-        result = NOTFOUND
+        logging.debug("looking in history of %r (%r)", tags, msgtags)
         # read from a point in history
         for t in msgtags:
             segfile = self._segfile_for_seqno(t, seqno)
             if segfile is None: continue
-            logging.debug(f"history of tag {t!r} in segfile {segfile}")
+            logging.debug("history of tag %r in segfile %s", t, segfile)
             with segfile.open() as f:
                 for seq, _, data in self._segfile_reader(f):
-                    if seq < seqno:
-                        continue
-                    elif seq == seqno:
-                        return data
-                    else:
+                    if seq > seqno:
                         break
+                    if seq == seqno:
+                        return data
         return NOTFOUND # if that seqno is missing
 
-    def read(self, start_seqno: int, tags: Optional[List[str]] = None) -> Iterable[Tuple[int, Union[YourEventType, NotFound]]]:
+    def read(self, start_seqno: int, end_seqno: int = None, tags: Optional[List[str]] = None) -> Iterable[Tuple[int, Union[YourEventType, NotFound]]]:
         """
         Return a generator that will return tuples (seqno, tag, data)
         If tags is a list, the events must have one of those tags.
         If tags is a string, it is treated as a regex that the tags must match.
         If tags is None or unspecified, all events are returned.
-        If the specifie sequence number doesn't exist, NOTFOUND will be returned.
+        If start_seqno is negative, it will be interpreted as 'from the (current) end'
+        If end_eqno is None (the default) it will be interpreted to mean 'all (currently existing) events'
         """
 
         def _existing_segfiles(tags, segno):
@@ -192,6 +191,8 @@ class MultiLog:
                 segfile = self._segfile_for_seg(tag, segno)
                 if segfile.exists():
                     yield tag, segfile
+        if start_seqno < 0:
+            start_seqno = max(start_seqno + self.seq, 0)
         if isinstance(tags, str):
             pattern = re.compile(tags)
             msgtags = [ tag for tag in self._tags() if pattern.fullmatch(tag) ]
@@ -204,12 +205,40 @@ class MultiLog:
             while cursors:
                 logging.debug("segment %s: %r", curseg, latest)
                 seq, tag, data = min(latest.values(), key=lambda i: i[0])
+                if end_seqno is not None and seq > end_seqno:
+                    return
                 latest[tag] = next(cursors[tag], None)
                 if latest[tag] is None:
                     del latest[tag]
                     del cursors[tag]
                 yield seq, tag, data
             curseg += 1
+
+    def slice(self, tags=None):
+        return MultiLogSlice(self, tags)
+
+
+
+class MultiLogSlice:
+
+    def __init__(self, db, tags):
+        self.db = db
+        self.tags = tags
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self.db.get(tags=self.tags, seqno=key)
+        if isinstance(key, slice):
+            retgen = self.db.read(start_seqno=key.start, end_seqno=key.stop, tags=self.tags)
+            if key.step is None:
+                yield from retgen
+            else:
+                for i, retval in retgen:
+                    if i % key.step == 0:
+                        yield retval
+
+
+
 
 
 Taimo = MultiLog
@@ -279,9 +308,16 @@ class SerializingMultiLog(MultiLog):
 
     def read(self, start_seqno: int, tags: Optional[List[str]] = None, with_tags: bool = False) -> Iterable[Tuple[int, Union[YourEventType, NotFound]]]:
         msgtags = self._xlate_tags(tags)
-        for seq, tag, data in super().read(start_seqno, tags=tags):
+        for seq, tag, data in super().read(start_seqno, tags=msgtags):
             if with_tags:
                 yield seq, tag, self.deserialize(data)
             else:
                 yield seq, self.deserialize(data)
+
+
+class AsyncSafeMultiLog(AsyncSafeLogMixin, MultiLog): pass
+class AsyncSafeSerializingMultiLog(AsyncSafeLogMixin, SerializingMultiLog): pass
+
+class ThreadSafeMultiLog(ThreadSafeLogMixin, MultiLog): pass
+class ThreadSafeSerializingMultiLog(ThreadSafeLogMixin, SerializingMultiLog): pass
 

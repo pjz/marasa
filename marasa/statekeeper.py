@@ -26,11 +26,11 @@ class StateKeeper:
     def __init__(self, storage_dir: Union[Path, str], segment_size=10000):
         """
         :storage_dir: is the directory to store log files in
-        :segment_size: is how many records to store per file; the default is 10000, so if average change size is 1KB, that's
-        a 10MB file
+        :segment_size: is how many records to store per file; the default is 10000,
+        so if average change size is 1KB, that's a 10MB file
         """
         self.dir = storage_dir if isinstance(storage_dir, Path) else Path(storage_dir)
-        logging.debug(f"Making a {self.__class__.__name__}DB in %s", str(self.dir))
+        logging.debug("Making a %sDB in %s", self.__class__.__name__, str(self.dir))
         if not self.dir.exists():
             self.dir.mkdir()
         self._segment_size = segment_size
@@ -47,7 +47,7 @@ class StateKeeper:
         """The maximum number of state changes per file segment"""
         return self._segment_size
 
-    def write(self, namespace: str, kvdict):
+    def put(self, namespace: str, kvdict):
         """
         update the set of key/value pairs in kvdict in the namespace
         return the seqno the update was applied in
@@ -56,7 +56,7 @@ class StateKeeper:
         self._write(namespace, self._seq, kvdict)
         return self._seq
 
-    def multiwrite(self, ns_kvdict):
+    def multiput(self, ns_kvdict):
         """
         write to multiple namespaces
         :ns_kvdict: a dictionary of namespace to kvdicts to update
@@ -155,10 +155,11 @@ class StateKeeper:
         return seqno, state
 
     def reload(self):
-        latest = 0
+        latest, state = 0, dict()
         for ns in self.namespaces():
             seqno, state = self._read_ns(ns)
             latest = max(latest, seqno)
+        self._state = state
         return latest
 
     def _read_cur(self, namespace, key=None):

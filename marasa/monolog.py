@@ -26,7 +26,7 @@ class MonoLog:
         """
         self.dir = storage_dir if isinstance(storage_dir, Path) else Path(storage_dir)
         self.name = basename
-        logging.debug(f"Making a {self.__class__.__name__}DB in %s", str(self.dir))
+        logging.debug("Making a %sDB in %s", self.__class__.__name__, str(self.dir))
         if not self.dir.exists():
             self.dir.mkdir()
         self.segment_size = segment_size

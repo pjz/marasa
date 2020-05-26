@@ -34,10 +34,14 @@ venv-dev $(VBIN)/pytest: $(VENV)
 .PHONY: wheel $(PROJ)
 wheel $(PROJ):
 	$(PYTHON) setup.py bdist_wheel
-	
+
+
+pylint mypy test testf: export PYTHONWARNINGS=ignore,default:::$(PROJ)
+
+PYTEST_ARGS = -l $(PYTEST_EXTRA)
+
 .PHONY: pylint
 pylint: $(VBIN)/pytest
-	PYTHONWARNINGS="ignore,default:::$(PROJ)" \
 	$(VBIN)/pytest $(PROJ) \
 		--ignore=$(VENV)/lib \
 		--pylint --pylint-rcfile=.pylintrc \
@@ -48,13 +52,15 @@ pylint: $(VBIN)/pytest
 
 .PHONY: mypy
 mypy: $(VBIN)/pytest
-	PYTHONWARNINGS="ignore,default:::$(PROJ)" \
 	$(VBIN)/pytest --mypy -m mypy $(PROJ) $(PYTEST_ARGS)
 
 .PHONY: test
 test: $(VBIN)/pytest
-	PYTHONWARNINGS="ignore,default:::$(PROJ)" \
 	$(VBIN)/pytest tests $(PYTEST_ARGS)
+
+testf: PYTEST_EXTRA:=--log-cli-level=DEBUG -lx --ff
+testf: test
+
 
 .PHONY: ci
 ci:: PYTEST_ARGS:=--junit-xml=ci.xml

@@ -29,7 +29,7 @@ def test_multi_put_get(multilog):
         else:
             assert datum == multilog.NOTFOUND, f"seqno {n} was incorrectly found!"
 
-    for n, tag, datum in multilog.read(1, ['a']):
+    for n, tag, datum in multilog.read(1, tags=['a']):
         assert n % 3 == 0
         assert tag == 'a'
 

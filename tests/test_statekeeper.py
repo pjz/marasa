@@ -7,13 +7,13 @@ def test_single_ns(statekeeper):
 
     # make 21 entries, 0..20
     for i in range(21):
-        s = db.write(NS, {'k': i})
-        # ensure that just after write, .get() works
+        s = db.put(NS, {'k': i})
+        # ensure that just after put, .get() works
         assert db.get(NS, key='k') == i
-        # ensure that just after write, .get() can see history
+        # ensure that just after put, .get() can see history
         assert db.get(NS, key='k', seqno=s) == i
 
-    # ensure that long after write, .get() can see history
+    # ensure that long after put, .get() can see history
     for i in range(1, 21):
         v = db.get(NS, key='k', seqno=i)
         assert v == i-1
@@ -34,7 +34,7 @@ def test_multi_ns(statekeeper):
 
     for i, ns in enumerate(namespaces):
         for j in range(6):
-            db.write(ns, {'k': i*10 + j})
+            db.put(ns, {'k': i*10 + j})
 
     # make sure all the namespaces exist
     assert set(db.namespaces()) == set(namespaces)
